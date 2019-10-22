@@ -1,0 +1,93 @@
+---
+title: "Homework 1"
+subtitle: "Computational Methods for American Politics"
+author: "Sanittawan Tan"
+date: "10/22/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load Libraries
+
+```{r libraries}
+library(ggplot2)
+library(tidyverse)
+```
+
+
+## Part 1 - Load data set
+
+```{r load data}
+dir <- "/Users/sanittawan/Documents/Nikki/UChicago/Classes/Autumn_2019/com_methods_am_politics/psets/problem-set-1/State Leg Prof Data & Codebook/legprof-components.v1.0.RData"
+load(dir)
+SLPdta <- as_tibble(x)
+```
+
+## Part 2 - Munge the data
+
+### a) Select only continuous features
+
+```{r filter continuous feats}
+SLPdta_filtered <- SLPdta %>% 
+  select(-mds1, -mds2)
+```
+
+
+### b) Restrict data to 2009/10 legislative session
+
+```{r select sessid 2009/10}
+SLPdta_filtered2 <- SLPdta_filtered %>% 
+    filter(sessid == "2009/10")
+```
+
+### c) Omit missing values
+
+```{r deal with NAs}
+SLPdta_filtered3 <- SLPdta_filtered2 %>%
+    select_if(~ !any(is.na(.)))
+```
+
+
+### d) Standardize input features
+
+```{r}
+
+```
+
+
+### e) Miscellaneous
+
+```{r}
+state_names <- unique(SLPdta_filtered$state) 
+state_abbr <- unique(SLPdta_filtered$stateabv)
+```
+
+
+## Part 3 - Diagnose Clusterability
+
+
+## Part 4 - Agglomerative Hierachical Clustering
+
+
+## Part 5 - k-Means 
+
+
+## Part 6 - Gaussian Mixture Model (GMM)
+
+
+## Part 7 - Plotting
+
+
+## Part 8 - Validation Strategy
+
+
+## Part 9 - Discussion on Validation Output
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
