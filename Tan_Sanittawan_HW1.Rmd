@@ -347,8 +347,10 @@ Examining the states that are in either clusters, I found that the results from 
 ```{r}
 set.seed(12345)
 
-#gmm1 <- normalmixEM(SLPdf[c(10, 11, 12, 13)], 
-#                    k = 2)
+SLPdf_matrix <- as.matrix(SLPdf[10:13])
+
+gmm1 <- normalmixEM(SLPdf_matrix, 
+                    k = 2)
 ```
 
 
@@ -360,7 +362,7 @@ Please see the plotted dendograms in part 4.
 
 #### k-means
 
-Here I show series of pairwise plots based on the k-means clustering algorithm's results. Two of the sixe plots suggest that there may be a problem with k-means since there are overlapping clusters. Since k-means uses hard-partitioning, it may not be as effective as GMM model for this type of data. 
+Here I show series of pairwise plots based on the k-means clustering algorithm's results. Two of the six plots suggest that there may be a problem with k-means since there are overlapping clusters. Since k-means uses hard-partitioning, it may not be as effective as GMM model for this type of data. 
 
 ```{r}
 kc1 <- fviz_cluster(kmeans, data = SLPdf, cluster = kmeans$cluster, 
