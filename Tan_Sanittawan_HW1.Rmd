@@ -344,13 +344,43 @@ Examining the states that are in either clusters, I found that the results from 
 
 ## Part 6 - Gaussian Mixture Model (GMM)
 
+This data set has 4 features and we hope to utilize all features for clustering. So, we need to use mixture models for multidimensional data.^[Checked against p. 29 of Mixtools [documentation](https://cran.r-project.org/web/packages/mixtools/mixtools.pdf) and [this tutorial](http://www.di.fc.ul.pt/~jpn/r/EM/GaussianMix.html)]. To make an argument about what distribution to select from, I created a series of density plot, both for the raw values and the standardized values of the features. The result is that the data normalization only changes the scale; however, the shapes of the distributions remain the same. One can argue that there seem to be varios overlaying normal distributions in these plots (where multiple peaks signify different distributions). Therefore, I will go ahead and choose Gaussian as my choice of distribution.
+
+```{r}
+SLPdta_short %>%
+  select(5, 6, 7, 8, 10, 11, 12, 13) %>%
+  gather() %>%                             
+  ggplot(aes(value)) +                     
+    facet_wrap(~ key, scales = "free") +  
+    geom_density()
+# modified from https://drsimonj.svbtle.com/quick-plot-of-all-variables
+```
+
 ```{r}
 set.seed(12345)
 
+# convert to matrix just to make sure elements are of the same type
 SLPdf_matrix <- as.matrix(SLPdf[10:13])
 
-gmm1 <- normalmixEM(SLPdf_matrix, 
-                    k = 2)
+SLPdf_matrix <- SLPdta_short %>%
+                select(5, 6, 7, 8) %>%
+                as.matrix()
+
+# check rank
+qr(SLPdf_matrix)$rank
+s <- solve(t(SLPdf_matrix) %*% SLPdf_matrix)
+
+# fit model
+gmm1 <- mvnormalmixEM(SLPdf_matrix,
+                    k = 2, epsilon=1e-04)
+
+## fail with error: Error in qr.solve(a) : singular matrix 'a' in solve
+```
+
+I couldn't locate the problem of the model fitting in the multivariate setting. To get around this problem, I demonstrate that using one feature is also possible for clustering. Here, I selected to fit 2 models: one with salary data and the other with total session length data.
+
+```{r}
+SLPdf_matrix <- as.matrix(SLPdf[10:13])
 ```
 
 
@@ -424,6 +454,8 @@ grid.arrange(kc1, kc2, kc3, kc4, kc5, kc6)
 
 #### Gaussian Mixture Model
 
+I have trouble fitting the multivariate normal mixture models. No output could be generated here.
+
 ```{r}
 #ggplot(data.frame(x = gmm1$x)) +
 #  geom_histogram(aes(x, ..density..), fill = "darkgray") +
@@ -438,40 +470,39 @@ grid.arrange(kc1, kc2, kc3, kc4, kc5, kc6)
 #  theme_bw()
 ```
 
-```{r}
-
-```
-
 
 ## Part 8 - Validation Strategy
 
-I select average silouette width because this validation strategy checks how well observations lie in a cluster across many values of k. Connectivity - may not be a good idea since some parts of the data points are very close to each other. 
+I select average silouette width because this validation strategy checks how well observations lie in a cluster across many values of k. The higher this value, the better configuration of the clusters.
 
 ```{r}
-sil_kmeans <- silhouette(kmeans$cluster, dist(subset_cols))
-fviz_silhouette(sil_kmeans)
-```
 
-```{r}
-pres_int <- as.matrix(pres[,2])
-
-internal_all <- clValid(pres_int, 2:10, 
+internal_all <- clValid(SLPdf_matrix, 2:10, 
                     clMethods = c("hierarchical", "kmeans", "model"), 
                     validation = "internal"); summary(internal_all)
 
 par(mfrow = c(2, 2))
 
-plot(internal_all, legend = FALSE,
+plot(internal_all, legend = TRUE,
      type = "l",
      main = " ")
 ```
 
+```{r}
+optimalScores(internal_all)
+```
+
+Based on the Silouette validation strategy, the agglomerative hierachical clustering method seems to be the nest method for this data set with 2 clusters. As the code compares three different models across three validation strategies, we see that the hierchical model also scores best across all validation strategies.
 
 ## Part 9 - Discussion on Validation Output
 
 #### a) Key takeaway from the fit
 
+The key takeaway is that 2 clusters seem to be the best way to group data points based on state legislative professionalism. One possible interpretation is that one group of states like Massachusetts, California, New York etc. appears to be more "professional" than the rest based on the session length, compensation and expenditures. However, if we were to include other measures such as gender and race, the groupings may result differently.  
+
 #### b) Optimal approach and the optimal value of k
+
+Based on the validation strategies, the optimal approach is hierachical clustering and the optimal value of k is 2.
 
 #### c) Reasons for selecting technically sub-optimal partitioning method
 
