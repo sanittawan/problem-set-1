@@ -3,8 +3,8 @@ title: "Homework 1"
 author: "Sanittawan Tan"
 date: "10/22/2019"
 output:
-  html_document: default
   pdf_document: default
+  html_document: default
 subtitle: Computational Methods for American Politics
 ---
 
@@ -360,7 +360,7 @@ SLPdta_short %>%
 
 Fit the multivariate normal mixture model.
 
-```{r, eval=FALSE}
+```{r}
 set.seed(12346)
 
 # convert to matrix just to make sure elements are of the same type
@@ -371,9 +371,21 @@ gmm_multi <- mvnormalmixEM(SLPdf_matrix,
                     k = 2, epsilon=1e-04)
 ```
 
-```{r, eval = FALSE}
-plot_GMM(gmm_multi, k = 2)
-# error: Error: Aesthetics must be either length 1 or the same as the data (49): x
+```{r, eval=FALSE}
+# unfinished plotting function
+data.frame(x = gmm_multi$x[, 1]) %>%
+ggplot() +
+    
+geom_histogram(aes(x, ..density..), binwidth = 1, colour = "black",
+                 fill = "white") +
+   stat_function(geom = "line", fun = plot_mix_comps,
+                 args = list(gmm_multi$mu[[1]][1], gmm_multi$sigma[[1]][1], 
+                 lam = gmm_multi$lambda[1]),
+                 colour = "red", lwd = 1.5) +
+   stat_function(geom = "line", fun = plot_mix_comps,
+                 args = list(gmm_multi$mu[2], gmm_multi$sigma[2], 
+                 lam =gmm_multi$lambda[2]),
+                 colour = "blue", lwd = 1.5)
 ```
 
 Unfortunately, I couldn't plot the results from the multivariate model. To get around this problem, I demonstrate that using one feature is also possible for clustering. Here, I selected to fit 2 models: one with salary data and the other with total session length data.
