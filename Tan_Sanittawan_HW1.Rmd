@@ -1,9 +1,11 @@
 ---
 title: "Homework 1"
-subtitle: "Computational Methods for American Politics"
 author: "Sanittawan Tan"
 date: "10/22/2019"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
+subtitle: Computational Methods for American Politics
 ---
 
 ```{r setup, include=FALSE}
@@ -356,15 +358,15 @@ SLPdta_short %>%
 # modified from https://drsimonj.svbtle.com/quick-plot-of-all-variables
 ```
 
-```{r}
+```{r, eval=FALSE}
 set.seed(12345)
 
 # convert to matrix just to make sure elements are of the same type
-SLPdf_matrix <- as.matrix(SLPdf[10:13])
+SLPdf_matrix <- as.matrix(SLPdf[, 10:13])
 
-SLPdf_matrix <- SLPdta_short %>%
-                select(5, 6, 7, 8) %>%
-                as.matrix()
+#SLPdf_matrix <- SLPdta_short %>%
+#                select(5, 6, 7, 8) %>%
+#                as.matrix()
 
 # check rank
 qr(SLPdf_matrix)$rank
@@ -374,15 +376,56 @@ s <- solve(t(SLPdf_matrix) %*% SLPdf_matrix)
 gmm1 <- mvnormalmixEM(SLPdf_matrix,
                     k = 2, epsilon=1e-04)
 
-## fail with error: Error in qr.solve(a) : singular matrix 'a' in solve
+## still fail with error even with 48 x 4 dim: Error in qr.solve(a) : singular matrix 'a' in solve
 ```
 
-I couldn't locate the problem of the model fitting in the multivariate setting. To get around this problem, I demonstrate that using one feature is also possible for clustering. Here, I selected to fit 2 models: one with salary data and the other with total session length data.
+Unfortunately, I couldn't locate the problem of the model fitting in the multivariate setting. To get around this problem, I demonstrate that using one feature is also possible for clustering. Here, I selected to fit 2 models: one with salary data and the other with total session length data.
 
 ```{r}
-SLPdf_matrix <- as.matrix(SLPdf[10:13])
+set.seed(12345)
+sal_matrix <- as.matrix(SLPdf$std_salary_real)
+gmm1 <- normalmixEM(sal_matrix, 
+                    k = 2) 
 ```
 
+Check the density plot. It does not look like the density plot fits the data well. This is because the red peak does not correspond to the real data density.
+
+```{r}
+ggplot(data.frame(x = gmm1$x)) +
+  geom_histogram(aes(x, ..density..), fill = "darkgray") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm1$mu[1], gmm1$sigma[1], lam = gmm1$lambda[1]),
+                colour = "darkred") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm1$mu[2], gmm1$sigma[2], lam = gmm1$lambda[2]),
+                colour = "darkblue") +
+  xlab("Salary") +
+  ylab("Density") + 
+  theme_bw()
+```
+
+
+```{r}
+tlength_matrix <- as.matrix(SLPdf$std_t_slength)
+gmm2 <- normalmixEM(tlength_matrix, 
+                    k = 2) 
+```
+
+Check the density plot. This looks like the model fits the total session length better with two clusters. The distributions seem to correspond to the data well.
+
+```{r}
+ggplot(data.frame(x = gmm2$x)) +
+  geom_histogram(aes(x, ..density..), fill = "darkgray") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm2$mu[1], gmm2$sigma[1], lam = gmm2$lambda[1]),
+                colour = "darkred") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm2$mu[2], gmm2$sigma[2], lam = gmm2$lambda[2]),
+                colour = "darkblue") +
+  xlab("Total Session Length") +
+  ylab("Density") + 
+  theme_bw()
+```
 
 ## Part 7 - Visual Inspection of Outputs
 
@@ -454,28 +497,14 @@ grid.arrange(kc1, kc2, kc3, kc4, kc5, kc6)
 
 #### Gaussian Mixture Model
 
-I have trouble fitting the multivariate normal mixture models. No output could be generated here.
-
-```{r}
-#ggplot(data.frame(x = gmm1$x)) +
-#  geom_histogram(aes(x, ..density..), fill = "darkgray") +
-#  stat_function(geom = "line", fun = plot_mix_comps,
-#                args = list(gmm1$mu[1], gmm1$sigma[1], lam = gmm1$lambda[1]),
-#                colour = "darkred") +
-#  stat_function(geom = "line", fun = plot_mix_comps,
-#                args = list(gmm1$mu[2], gmm1$sigma[2], lam = gmm1$lambda[2]),
-#                colour = "darkblue") +
-#  xlab("Democratic Vote Shares") +
-#  ylab("Density") + 
-#  theme_bw()
-```
-
+Please see the density plots in part 6.
 
 ## Part 8 - Validation Strategy
 
 I select average silouette width because this validation strategy checks how well observations lie in a cluster across many values of k. The higher this value, the better configuration of the clusters.
 
 ```{r}
+SLPdf_matrix <- as.matrix(SLPdf[, 10:13])
 
 internal_all <- clValid(SLPdf_matrix, 2:10, 
                     clMethods = c("hierarchical", "kmeans", "model"), 
