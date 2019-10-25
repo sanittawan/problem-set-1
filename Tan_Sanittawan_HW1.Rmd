@@ -15,8 +15,15 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r libraries}
 library(ggplot2)
 library(tidyverse)
+library(clustertend)
+library(factoextra)
+library(seriation)
+library(gridExtra)
+library(mixtools)
+library(plotGMM)
+library(clValid)
+library(cluster)
 ```
-
 
 ## Part 1 - Load data set
 
@@ -35,7 +42,6 @@ SLPdta_filtered <- SLPdta %>%
   select(-mds1, -mds2)
 ```
 
-
 ### b) Restrict data to 2009/10 legislative session
 
 ```{r select sessid 2009/10}
@@ -46,17 +52,36 @@ SLPdta_filtered2 <- SLPdta_filtered %>%
 ### c) Omit missing values
 
 ```{r deal with NAs}
-SLPdta_filtered3 <- SLPdta_filtered2 %>%
-    select_if(~ !any(is.na(.)))
+SLPdta_filtered3 <- na.omit(SLPdta_filtered2)
+# idea from http://www.programmingr.com/examples/remove-na-rows-in-r/
 ```
-
 
 ### d) Standardize input features
 
-```{r}
-
+```{r scaling}
+SLPdta_short <- SLPdta_filtered3 %>%
+  mutate(std_t_slength = scale(t_slength, center = TRUE, scale = TRUE),
+         std_slength = scale(slength, center = TRUE, scale = TRUE),
+         std_salary_real = scale(salary_real, center = TRUE, scale = TRUE),
+         std_expend = scale(expend, center = TRUE, scale = TRUE))
 ```
 
+Here I verify that the normalization of the input features work as expected.
+
+```{r}
+SLPdta_short %>% 
+    summarize(
+        mean_std_t_slength = round(mean(std_t_slength), digits = 2),
+        sd_std_t_slength = sd(std_t_slength),
+        mean_std_slength = round(mean(std_slength), digits = 2),
+        sd_std_slength = sd(std_slength),
+        mean_std_salaray_real = round(mean(std_salary_real), digits = 2),
+        sd_std_salarary_real = sd(std_salary_real),
+        mean_std_expend = round(mean(std_expend), digits = 2),
+        sd_std_expend = sd(std_expend)
+    ) %>% 
+    t()
+```
 
 ### e) Miscellaneous
 
@@ -68,26 +93,385 @@ state_abbr <- unique(SLPdta_filtered$stateabv)
 
 ## Part 3 - Diagnose Clusterability
 
+First, I generated series of pair plots between two variables to see if there are any natural clusters in the data. There are 3 types of groupings that we discussed in class: location, shape, and density. It is quite obvious from these plots that there are some groupings based on location and density. Take the plot between compensation and total session length (plot row 3, col 1) as an example. A set of points tend to cluster in the bottom left whereas another set of points tend to spread over to the top right corner. These two set have very different density. Similar pattern also occurs in the total session length against regular session length plot (plot row 2, col 1). A set of points form almost a straight line in the bottom left corner while a handful of the remaining points scatter over to the top right corner. 
+
+```{r}
+pairs(SLPdta_short[10:13], labels = c("total session length", "regular session length", "compensation", "expenditures"))
+```
+
+
+Second, I will compute Hopkins Statistics to see if the data is random. It is necessary to set up a hypothesis testing with the null and alternative hypotheses as follows:
+
+$$H_0: \text{Data are uniformly distributed} \\
+H_a: \text{Data are not uniformly distributed}$$
+
+Generally, a threshold to reject the null hypothesis is below 0.5. We will compute it using an R function from the clustertend package.
+
+```{r hopkins}
+set.seed(1234)
+subset_cols <- SLPdta_short %>% select(10:13)
+hopkins(subset_cols, n = nrow(subset_cols) - 1)
+# idea from http://www.sthda.com/english/wiki/print.php?id=238
+```
+
+I found that the resulting Hopkins statistics is 0.17 which is far below the 0.5 threshold. Therefore, null hypothesis can be rejected and our data is clusterable.
+
+Second, I will take a visual inspection of the clusterability via the Ordered Dissimilarity Images (ODI) plots.
+
+__Total Session Length vs Regular Session Length__
+
+There seem to be 2 clusters. One small cluster at the top left corner and the other big cluster spanning diagonally to the bottom right corner.
+
+```{r total regular}
+lengths_dist <- dist(SLPdta_short[c("std_t_slength", "std_slength")])
+p1 <- dissplot(lengths_dist)
+```
+
+__Salary vs Expenditures__
+
+There seem to be one clear cluster at the top left corner. Besides, the pattern does not look so clear.
+
+```{r salary expend}
+fin_dist <- dist(SLPdta_short[c("std_salary_real", "std_expend")])
+p2 <- dissplot(fin_dist)
+```
+
+__Total Session Length vs Salary__
+
+There seems to be two clear clusters at the left corner and in the right corner. 
+
+```{r total length salary}
+tlengthsalary_dist <- dist(SLPdta_short[c("std_t_slength", "std_salary_real")])
+p3 <- dissplot(tlengthsalary_dist)
+```
+
+__Total Session Length vs Expenditures__
+
+There seems to be a large cluster in the bottom right though the pattern does not look clear.
+
+```{r total length expend}
+tlengthex_dist <- dist(SLPdta_short[c("std_t_slength", "std_expend")])
+p4 <- dissplot(tlengthex_dist)
+```
+
+__Regular Session Length vs Expenditures__
+
+There seem to be 4 clusters divided by white lines.
+
+```{r}
+rlengthex_dist <- dist(SLPdta_short[c("std_slength", "std_expend")])
+p5 <- dissplot(rlengthex_dist)
+```
+
+__Regular Session Length vs Salary__
+
+There seems to be a large cluster on the top left corner (large square) vs small square in the bottom right.
+
+```{r}
+rlengthsalary_dist <- dist(SLPdta_short[c("std_slength", "std_salary_real")])
+p6 <- dissplot(rlengthsalary_dist)
+```
+
+Based on all dianostic tests, namely pair plots, the Hopkins statistics and the ODI plots, that I performed, it is safe to proceed to fitting with clustering methods because the data shows that there are potential clusters and the data is not random. In other words. it is likely that there is natural, non-random structure in the data set.
 
 ## Part 4 - Agglomerative Hierachical Clustering
 
+As an exercise, I tried out single, complete, average, and centroid linkage methods.
+
+```{r, results = "hide"}
+SLPdf <- as.data.frame(SLPdta_short)
+rownames(SLPdf) <- SLPdf$state
+sub_SLP <- SLPdf %>% 
+  select(std_t_slength, std_salary_real, std_salary_real, std_expend) %>% 
+  dist() 
+
+sub_SLP
+```
+
+__Single Linkage Method__
+
+Single linkage which minimizes inter-cluster dissimilarity results in an elongated dendogram as we discussed in class. 
+
+```{r linkage single}
+hc_single <- hclust(sub_SLP, 
+                    method = "single"); plot(hc_single, hang = -1)
+```
+
+Complete linkage which maximizes inter-cluster dissimilarity results in a balanced dendogram.
+
+```{r linkage complete}
+hc_complete <- hclust(sub_SLP, 
+                      method = "complete"); plot(hc_complete, hang = -1)
+```
+
+Average linkage which calculates the mean inter-cluster dissimilarity results in a balanced dendogram as well.
+
+```{r}
+hc_average <- hclust(sub_SLP, 
+                     method = "average"); plot(hc_average, hang = -1)
+```
+
+Centroid linkage calculates the dissimilarity between the centroid of clusters.
+
+```{r}
+hc_centroid <- hclust(sub_SLP,
+                      method = "centroid"); plot(hc_centroid, hang = -1)
+```
+
+__Discussion__
+
+Overall, the linkage methods do have impact on how the data points are clustered. However, one consistent pattern stands out in all methods: California seems to be its own cluster with only one member (itself). Furthermore, in models that use avarage, centroid, and complete methods, if the trees are cut at the height between 2 and 4, there seems to be 3 distinct clusters. One such cluster includes only California which is the smallest one. Another cluster is on the right with a few more states. The list of states in this cluster across all 3 dendograms is interesting since Massachusetts, Pennsylvania, New York appear in all of them. The last cluster is in the middle where most of the states are members.
+
+Looking closer to the members of each cluster, one observation is that the states with full-time or semi-full-time legislators tend to be clustered together. According to [the National Conference of State Legislatures](http://www.ncsl.org/research/about-state-legislatures/full-and-part-time-legislatures.aspx), California, Michigan, New York, Pennsylvania, Massachusetts, Alaska, Hawaii, Illinois, Ohio, and Wisconsin have legislators who are full time and with large staffers. This may explain why we see Massachusetts, Pennsylvania, New York appear in the same cluster repeatedly and speak to how the algorithm clusters them based on the session lengths, pay and expenditures which, in turn, suggests that these states' legislatures are more professional or similar to congress than others. However, this explanation still fails to account for why California has its own cluster. This may suggests that there are other factors at play which differentiate California from its peers.
+
+After seeing the results from the agglomerative heirachical clustering, I am curious about the data. Thus, I made a side exploration into 4 features by looking at the feature means and the states.
+
+```{r}
+SLP_sum <- SLPdta_short %>%
+    group_by(state) %>%
+    summarize(mean_ts_length = mean(t_slength, na.rm = TRUE),
+              mean_slength = mean(slength, na.rm = TRUE),
+              mean_salary = mean(salary_real, na.rm = TRUE),
+              mean_expend = mean(expend, na.rm = TRUE)
+              )
+```
+
+```{r}
+g1 <- ggplot(SLP_sum, aes(x = reorder(state, -mean_ts_length), y = mean_ts_length))
+g1 <- g1 + geom_bar(stat = "identity")
+g1 <- g1 + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r}
+g2 <- ggplot(SLP_sum, aes(x = reorder(state, -mean_slength), y = mean_slength))
+g2 <- g2 + geom_bar(stat = "identity")
+g2 <- g2 + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r}
+g3 <- ggplot(SLP_sum, aes(x = reorder(state, -mean_salary), y = mean_salary))
+g3 <- g3 + geom_bar(stat = "identity")
+g3 <- g3 + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r}
+g4 <- ggplot(SLP_sum, aes(x = reorder(state, -mean_expend), y = mean_expend))
+g4 <- g4 + geom_bar(stat = "identity")
+g4 <- g4 + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r}
+grid.arrange(g1, g2, g3, g4)
+```
 
 ## Part 5 - k-Means 
 
+Note: as our raw features are in different units (length of time and dollars), I use the standardized versions of these features before applying k-means.^[See [here](https://stats.stackexchange.com/questions/21222/are-mean-normalization-and-feature-scaling-needed-for-k-means-clustering) and [here](https://datascience.stackexchange.com/questions/6715/is-it-necessary-to-standardize-your-data-before-clustering)]
+
+```{r}
+set.seed(1234)
+
+kmeans <- kmeans(SLPdf[10:13],
+                 centers = 2, 
+                 nstart = 15) 
+```
+
+```{r}
+SLPdf$Cluster <- as.factor(kmeans$cluster)
+```
+
+```{r}
+k1 <- ggplot(SLPdf, aes(t_slength, fill = Cluster)) + 
+  geom_histogram(binwidth = 3) + 
+  theme_bw() +
+  scale_fill_manual(values=c("blue", "red")) +
+  labs(x = "Total Session Length",
+       y = "Count of States")
+```
+
+```{r}
+k2 <- ggplot(SLPdf, aes(slength, fill = Cluster)) + 
+  geom_histogram(binwidth = 3) + 
+  theme_bw() +
+  scale_fill_manual(values=c("blue", "red")) +
+  labs(x = "Regular Session Length",
+       y = "Count of States")
+```
+
+```{r}
+k3 <- ggplot(SLPdf, aes(salary_real, fill = Cluster)) + 
+  geom_histogram(binwidth = 3) + 
+  theme_bw() +
+  scale_fill_manual(values=c("blue", "red")) +
+  labs(x = "Salary",
+       y = "Count of States")
+```
+
+```{r}
+k4 <- ggplot(SLPdf, aes(expend, fill = Cluster)) + 
+  geom_histogram(binwidth = 3) + 
+  theme_bw() +
+  scale_fill_manual(values=c("blue", "red")) +
+  labs(x = "Expenditures",
+       y = "Count of States")
+```
+
+```{r}
+grid.arrange(k1, k2, k3, k4)
+```
+
+Looking at the clusters in a descriptive fashion.
+
+```{r}
+t <- as.table(kmeans$cluster)
+(t <- data.frame(t))
+rownames(t) <- SLPdf$state
+colnames(t)[colnames(t)=="Freq"] <- "Assignment"
+t$Var1 <- NULL
+```
+
+```{r}
+subset(t, Assignment == 2)
+subset(t, Assignment == 1)
+```
+
+
+__Discussion__
+
+The output from k-means algorithm as shown in the plots suggests that there are some misclassifications or two clusters may not be sufficient. Plotting the clustering results against all four features, one at a time, highlights this observation. For instance, in the total session length plot, there are two states with more than 200 days that are classified in the first cluster which overlaps with the second cluster. Similar issue also occurs in the salary and expenditures plots. The cleanest plot is regular session length. 
+
+Examining the states that are in either clusters, I found that the results from k-means, to some extent, agree with the hierachical clustering model. This is because California, Massachusetts, Michigam, New York, Ohio, and Pennsylvania are in its own cluster in the k-means model.
 
 ## Part 6 - Gaussian Mixture Model (GMM)
 
+```{r}
+set.seed(12345)
 
-## Part 7 - Plotting
+#gmm1 <- normalmixEM(SLPdf[c(10, 11, 12, 13)], 
+#                    k = 2)
+```
+
+
+## Part 7 - Visual Inspection of Outputs
+
+#### Agglomerative Heirachical Clustering
+
+Please see the plotted dendograms in part 4. 
+
+#### k-means
+
+Here I show series of pairwise plots based on the k-means clustering algorithm's results. Two of the sixe plots suggest that there may be a problem with k-means since there are overlapping clusters. Since k-means uses hard-partitioning, it may not be as effective as GMM model for this type of data. 
+
+```{r}
+kc1 <- fviz_cluster(kmeans, data = SLPdf, cluster = kmeans$cluster, 
+             choose.vars = c("t_slength", "slength"),
+             geom = "point", stand = FALSE,
+             ellipse = TRUE,
+             xlab = "Total Session Length",
+             ylab = "Regular Session Length")
+```
+
+```{r}
+kc2 <- fviz_cluster(kmeans, data = SLPdf, cluster = kmeans$cluster, 
+             choose.vars = c("t_slength", "salary_real"),
+             geom = "point", stand = FALSE,
+             ellipse = TRUE,
+             xlab = "Total Session Length",
+             ylab = "Salary")
+```
+
+```{r}
+kc3 <- fviz_cluster(kmeans, data = SLPdf, cluster = kmeans$cluster, 
+             choose.vars = c("t_slength", "expend"),
+             geom = "point", stand = FALSE,
+             ellipse = TRUE,
+             xlab = "Total Session Length",
+             ylab = "Expenditures")
+```
+
+```{r}
+kc4 <- fviz_cluster(kmeans, data = SLPdf, cluster = kmeans$cluster, 
+             choose.vars = c("slength", "salary_real"),
+             geom = "point", stand = FALSE,
+             ellipse = TRUE,
+             xlab = "Total Session Length",
+             ylab = "Regular Session Length")
+```
+
+```{r}
+kc5 <- fviz_cluster(kmeans, data = SLPdf, cluster = kmeans$cluster, 
+             choose.vars = c("slength", "expend"),
+             geom = "point", stand = FALSE,
+             ellipse = TRUE,
+             xlab = "Total Session Length",
+             ylab = "Regular Session Length")
+```
+
+```{r}
+kc6 <- fviz_cluster(kmeans, data = SLPdf, cluster = kmeans$cluster, 
+             choose.vars = c("salary_real", "expend"),
+             geom = "point", stand = FALSE,
+             ellipse = TRUE,
+             xlab = "Total Session Length",
+             ylab = "Regular Session Length")
+```
+
+```{r}
+grid.arrange(kc1, kc2, kc3, kc4, kc5, kc6)
+```
+
+#### Gaussian Mixture Model
+
+```{r}
+#ggplot(data.frame(x = gmm1$x)) +
+#  geom_histogram(aes(x, ..density..), fill = "darkgray") +
+#  stat_function(geom = "line", fun = plot_mix_comps,
+#                args = list(gmm1$mu[1], gmm1$sigma[1], lam = gmm1$lambda[1]),
+#                colour = "darkred") +
+#  stat_function(geom = "line", fun = plot_mix_comps,
+#                args = list(gmm1$mu[2], gmm1$sigma[2], lam = gmm1$lambda[2]),
+#                colour = "darkblue") +
+#  xlab("Democratic Vote Shares") +
+#  ylab("Density") + 
+#  theme_bw()
+```
+
+```{r}
+
+```
 
 
 ## Part 8 - Validation Strategy
 
+I select average silouette width because this validation strategy checks how well observations lie in a cluster across many values of k. Connectivity - may not be a good idea since some parts of the data points are very close to each other. 
+
+```{r}
+sil_kmeans <- silhouette(kmeans$cluster, dist(subset_cols))
+fviz_silhouette(sil_kmeans)
+```
+
+```{r}
+pres_int <- as.matrix(pres[,2])
+
+internal_all <- clValid(pres_int, 2:10, 
+                    clMethods = c("hierarchical", "kmeans", "model"), 
+                    validation = "internal"); summary(internal_all)
+
+par(mfrow = c(2, 2))
+
+plot(internal_all, legend = FALSE,
+     type = "l",
+     main = " ")
+```
+
 
 ## Part 9 - Discussion on Validation Output
 
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
+#### a) Key takeaway from the fit
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+#### b) Optimal approach and the optimal value of k
+
+#### c) Reasons for selecting technically sub-optimal partitioning method
+
+I can think of three reasons. The first reason is that the number of clusters yielded by the optimal method may go against the natural clusters that researchers know as the domain expert. Second, the k value produced by the optimal method may not help us reduce the dimension of the data as we hope. For example, what if the k value from the algorithm is so large that it is almost equal to n kinds (e.g. states, gender, districts etc.) in the data set? In this scenario, the clustering may not be as useful as it is not reducing information for us. Hence, selecting a sub-optimal method that yields smaller number of clusters may, in fact, be more reasonable. The last scenario that I can imagine is when two or more validation strategies are used to evaluate the algorithms and they produce conflicting results. Researchers may use domain expertise to select a method that may not be optimal but comport with their understanding of the data/issues. 
+
